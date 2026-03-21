@@ -1,0 +1,15 @@
+[package]
+name = "trajectory"
+version = "0.1.0"
+edition = "2021"
+description = "RRT/RRT* robot pathing algorithm for CNC jewelry manufacturing"
+
+[features]
+default = []
+vision = ["opencv"]
+
+[dependencies]
+rand = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+opencv = { version = "0.93", optional = true }

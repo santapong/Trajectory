@@ -1,0 +1,7 @@
+{
+  "name": "Ball6",
+  "type": "ball",
+  "diameter_mm": 6.0,
+  "length_mm": 80.0,
+  "tcp": { "xyz": [0.0, 0.0, 80.0] }
+}

@@ -89,4 +89,54 @@ fn main() {
         }
         None => println!("No path found with RRT*."),
     }
+
+    #[cfg(all(feature = "surface", feature = "abb"))]
+    surface_demo();
+}
+
+#[cfg(all(feature = "surface", feature = "abb"))]
+fn surface_demo() {
+    use trajectory::frame::WorkpieceFrame;
+    use trajectory::post::{AbbRapidPost, PostContext, PostProcessor};
+    use trajectory::surface::StlSurface;
+    use trajectory::tool::Tool;
+    use trajectory::toolpath::{ToolPathStrategy, ToolpathParams, ZigZagStrategy};
+
+    println!("\n=== 3D Surface zig-zag -> ABB RAPID (mini demo) ===");
+    let stl_path = "tests/fixtures/flat_plane.stl";
+    let surface = match StlSurface::load(stl_path) {
+        Ok(s) => s,
+        Err(e) => {
+            println!("(skipping 3D demo: {} not loadable: {})", stl_path, e);
+            return;
+        }
+    };
+    let tool = match Tool::load_json("tests/fixtures/tool_ball6.json") {
+        Ok(t) => t,
+        Err(_) => return,
+    };
+    let frame = WorkpieceFrame::identity();
+    let params = ToolpathParams {
+        stepover_mm: 20.0,
+        direction_deg: 0.0,
+        safe_z_mm: 50.0,
+        feed_height_mm: 5.0,
+        max_segment_mm: 20.0,
+        offset_along_axis_mm: 0.0,
+    };
+    let toolpath = ZigZagStrategy.generate(&surface, &tool, &params);
+
+    let ctx = PostContext {
+        program_name: "ZigZagDemo",
+        tool: &tool,
+        frame: &frame,
+        feedrate_mm_min: 600.0,
+        rapid_speed: 5000.0,
+    };
+    let rapid = AbbRapidPost.emit(&toolpath, &ctx).expect("post");
+    println!("--- First 10 lines of RAPID ---");
+    for line in rapid.lines().take(10) {
+        println!("{line}");
+    }
+    println!("... ({} total lines, {} poses)", rapid.lines().count(), toolpath.poses.len());
 }

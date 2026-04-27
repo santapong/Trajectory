@@ -90,6 +90,60 @@ Pipeline:
 ~2× tool diameter is unmachinable (Nyquist). Brute-force ray-cast on every
 triangle is fine up to a few million triangles; a BVH is a future addition.
 
+## CLI
+
+A `trajectory-cli` binary turns a PNG into a RAPID program without touching
+any Rust code — the entry point for UAT operators and shop-floor users.
+
+```bash
+cargo build --release --bin trajectory-cli --features cli
+
+./target/release/trajectory-cli relief \
+  --image samples/portrait.png \
+  --tool tests/fixtures/tool_ball6.json \
+  --frame tests/fixtures/workpiece_identity.json \
+  --pixel-size 0.1 --max-depth 4 --stepover 0.3 --safe-z 25 \
+  --feedrate 300 --note "UAT run 42" \
+  --out portrait.mod --json portrait_path.json
+```
+
+The emitted RAPID `MODULE` carries a provenance comment block (version, UTC
+timestamp, source-PNG SHA-256, options JSON, tool/frame paths, free-form
+note) so any program can be traced back to its inputs. Cross-field validation
+rejects unsafe combinations (stepover ≥ tool diameter, safe Z below relief
+peak, out-of-range opts).
+
+`trajectory-cli validate ...` runs the same checks without producing output.
+
+## Web frontend
+
+A single Rust binary serves a small SPA + an HTTP API. No Node or `npm`.
+
+```bash
+cargo run --release --bin trajectory-web --features web -- \
+  --tool tests/fixtures/tool_ball6.json \
+  --frame tests/fixtures/workpiece_identity.json \
+  --addr 127.0.0.1:8080
+# open http://127.0.0.1:8080
+```
+
+The page lets you drag-drop a PNG, tweak heightmap and toolpath options,
+preview the resulting toolpath in 3D (cutting moves green, travel blue), and
+download the RAPID program. API endpoints:
+
+- `GET  /api/health` → `{"status":"ok","version":"…"}`
+- `GET  /api/defaults` → default `ReliefRequest` JSON
+- `POST /api/relief` (multipart: `image=<png>`, `request=<json>`) → `{rapid, toolpath, stats}`
+
+## UAT
+
+See [`docs/UAT.md`](docs/UAT.md) for the acceptance test procedure: build/test
+gates, CLI and web functional checks, provenance verification, dry-run on a
+real machine, and the sign-off form. The calibration golden test
+(`tests/calibration_golden.rs`) is the load-bearing gate — it asserts a known
+step-pyramid PNG produces a RAPID program whose Z values include every
+expected plateau.
+
 ## With OpenCV Vision (Optional)
 
 Requires OpenCV installed on your system.
@@ -127,6 +181,8 @@ src/
 | `abb` | yes | ABB RAPID post-processor |
 | `pointcloud` | no | Point-cloud surface stub (depth camera) |
 | `heightmap` | no | Grayscale-PNG → heightmap → relief surface (pulls in `png` crate) |
+| `cli` | no | `trajectory-cli` binary (clap + tracing-subscriber); enables `heightmap` + `abb` |
+| `web` | no | `trajectory-web` Axum server + embedded SPA (enables `cli`) |
 | `vision` | no | OpenCV camera input for 2D obstacle detection |
 
 `cargo build --no-default-features` produces the original 2D-only build.

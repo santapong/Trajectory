@@ -13,6 +13,12 @@ pub mod abb_rapid;
 #[cfg(feature = "abb")]
 pub use abb_rapid::AbbRapidPost;
 
+#[cfg(feature = "abb")]
+pub mod provenance;
+
+#[cfg(feature = "abb")]
+pub use provenance::JobMetadata;
+
 #[derive(Debug, thiserror::Error)]
 pub enum PostError {
     #[error("template error: {0}")]
@@ -28,6 +34,10 @@ pub struct PostContext<'a> {
     pub frame: &'a WorkpieceFrame,
     pub feedrate_mm_min: f64,
     pub rapid_speed: f64,
+    /// Optional provenance block emitted as RAPID comments before the MODULE
+    /// body. Lets a UAT operator trace any program back to its inputs.
+    #[cfg(feature = "abb")]
+    pub metadata: Option<&'a JobMetadata>,
 }
 
 pub trait PostProcessor {

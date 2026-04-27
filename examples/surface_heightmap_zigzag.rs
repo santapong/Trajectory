@@ -51,12 +51,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         travel
     );
 
+    let opts_json = serde_json::to_string(&opts).unwrap_or_default();
+    let metadata = trajectory::post::JobMetadata::new()
+        .with_source_file("tests/fixtures/relief_ramp.png")?
+        .with_opts_json(opts_json)
+        .with_tool_path("tests/fixtures/tool_ball6.json")
+        .with_frame_path("tests/fixtures/workpiece_identity.json")
+        .with_note("example: surface_heightmap_zigzag");
+
     let ctx = PostContext {
         program_name: "HeightmapRelief",
         tool: &tool,
         frame: &frame,
         feedrate_mm_min: 300.0,
         rapid_speed: 5000.0,
+        metadata: Some(&metadata),
     };
     let rapid = AbbRapidPost.emit(&toolpath, &ctx)?;
 

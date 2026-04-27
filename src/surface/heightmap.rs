@@ -8,12 +8,15 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
 
+use serde::{Deserialize, Serialize};
+use tracing::{debug, info_span};
+
 use crate::math3d::Point3D;
 
 use super::{Mesh, Surface, SurfaceError, Triangle};
 
 /// Options for [`HeightMapSurface::from_png`].
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct HeightMapOpts {
     /// Real-world XY size of one pixel, in millimeters.
     pub pixel_size_mm: f64,
@@ -45,6 +48,44 @@ impl Default for HeightMapOpts {
     }
 }
 
+impl HeightMapOpts {
+    /// Reject obviously unsafe values before any pixel work happens.
+    /// Bounds are tuned to the project's stated domain (CNC jewelry, mm-scale).
+    pub fn validate(&self) -> Result<(), SurfaceError> {
+        if !self.pixel_size_mm.is_finite() || self.pixel_size_mm <= 0.0 || self.pixel_size_mm > 10.0 {
+            return Err(SurfaceError::InvalidMesh(format!(
+                "pixel_size_mm must be in (0, 10] mm, got {}",
+                self.pixel_size_mm
+            )));
+        }
+        if !self.max_depth_mm.is_finite() || self.max_depth_mm <= 0.0 || self.max_depth_mm > 50.0 {
+            return Err(SurfaceError::InvalidMesh(format!(
+                "max_depth_mm must be in (0, 50] mm, got {}",
+                self.max_depth_mm
+            )));
+        }
+        if !self.gamma.is_finite() || self.gamma < 0.1 || self.gamma > 5.0 {
+            return Err(SurfaceError::InvalidMesh(format!(
+                "gamma must be in [0.1, 5.0], got {}",
+                self.gamma
+            )));
+        }
+        if !self.blur_sigma.is_finite() || self.blur_sigma < 0.0 || self.blur_sigma > 10.0 {
+            return Err(SurfaceError::InvalidMesh(format!(
+                "blur_sigma must be in [0, 10] px, got {}",
+                self.blur_sigma
+            )));
+        }
+        if !self.base_pad_mm.is_finite() || self.base_pad_mm < 0.0 || self.base_pad_mm > 50.0 {
+            return Err(SurfaceError::InvalidMesh(format!(
+                "base_pad_mm must be in [0, 50] mm, got {}",
+                self.base_pad_mm
+            )));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct HeightMapSurface {
     mesh: Mesh,
@@ -55,17 +96,25 @@ impl HeightMapSurface {
     /// surface. RGB inputs are converted to luminance via Rec.601:
     /// `0.299·R + 0.587·G + 0.114·B`.
     pub fn from_png<P: AsRef<Path>>(path: P, opts: HeightMapOpts) -> Result<Self, SurfaceError> {
-        let file = File::open(path)?;
-        let decoder = png::Decoder::new(BufReader::new(file));
-        let mut reader = decoder
-            .read_info()
-            .map_err(|e| SurfaceError::InvalidMesh(format!("png: {e}")))?;
-        let info = reader.info().clone();
-        let mut buf = vec![0u8; reader.output_buffer_size()];
-        let frame = reader
-            .next_frame(&mut buf)
-            .map_err(|e| SurfaceError::InvalidMesh(format!("png frame: {e}")))?;
-        buf.truncate(frame.buffer_size());
+        opts.validate()?;
+        let span = info_span!("heightmap.from_png", path = %path.as_ref().display());
+        let _enter = span.enter();
+
+        let (buf, info) = {
+            let _s = info_span!("decode").entered();
+            let file = File::open(path)?;
+            let decoder = png::Decoder::new(BufReader::new(file));
+            let mut reader = decoder
+                .read_info()
+                .map_err(|e| SurfaceError::InvalidMesh(format!("png: {e}")))?;
+            let info = reader.info().clone();
+            let mut buf = vec![0u8; reader.output_buffer_size()];
+            let frame = reader
+                .next_frame(&mut buf)
+                .map_err(|e| SurfaceError::InvalidMesh(format!("png frame: {e}")))?;
+            buf.truncate(frame.buffer_size());
+            (buf, info)
+        };
 
         let w = info.width as usize;
         let h = info.height as usize;
@@ -74,21 +123,34 @@ impl HeightMapSurface {
                 "heightmap must be at least 2x2 pixels, got {w}x{h}"
             )));
         }
+        debug!(width = w, height = h, color = ?info.color_type, depth = ?info.bit_depth, "decoded png");
 
-        let intensity = decode_to_normalized(&buf, w, h, info.color_type, info.bit_depth)?;
+        let intensity = {
+            let _s = info_span!("normalize").entered();
+            decode_to_normalized(&buf, w, h, info.color_type, info.bit_depth)?
+        };
         let intensity = if opts.blur_sigma > 0.0 {
+            let _s = info_span!("blur", sigma = opts.blur_sigma).entered();
             gaussian_blur(&intensity, w, h, opts.blur_sigma)
         } else {
             intensity
         };
 
-        let z = intensity_to_z(&intensity, &opts);
-        let mesh = build_mesh(&z, w, h, &opts)?;
+        let z = {
+            let _s = info_span!("intensity_to_z").entered();
+            intensity_to_z(&intensity, &opts)
+        };
+        let mesh = {
+            let _s = info_span!("triangulate", w, h).entered();
+            build_mesh(&z, w, h, &opts)?
+        };
+        debug!(triangles = mesh.triangles.len(), "mesh built");
         Ok(Self { mesh })
     }
 
     /// Construct directly from a row-major Z grid (mm). Mostly useful for tests.
     pub fn from_grid(z_mm: &[f64], width: usize, height: usize, opts: HeightMapOpts) -> Result<Self, SurfaceError> {
+        opts.validate()?;
         if z_mm.len() != width * height {
             return Err(SurfaceError::InvalidMesh(format!(
                 "z_mm length {} != width*height {}",

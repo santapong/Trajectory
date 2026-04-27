@@ -9,7 +9,7 @@ default = ["surface", "abb"]
 surface = ["dep:nalgebra", "dep:stl_io"]
 abb = []
 pointcloud = []
-heightmap = []
+heightmap = ["surface", "dep:png"]
 vision = ["dep:opencv"]
 
 [dependencies]
@@ -19,4 +19,13 @@ serde_json = "1"
 thiserror = "1"
 nalgebra = { version = "0.33", features = ["serde-serialize"], optional = true }
 stl_io = { version = "0.8", optional = true }
+png = { version = "0.17", optional = true }
 opencv = { version = "0.93", optional = true }
+
+[[example]]
+name = "surface_heightmap_zigzag"
+required-features = ["heightmap"]
+
+[[example]]
+name = "gen_relief_png"
+required-features = ["heightmap"]

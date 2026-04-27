@@ -10,6 +10,7 @@ RRT/RRT* robot pathing algorithm for CNC jewelry manufacturing (filing and polis
 - **Path smoothing** - Post-processing to create smooth CNC-friendly toolpaths
 - **JSON waypoint export** - Serialized output for CNC controller consumption
 - **3D surface toolpaths** - Load STL surface, generate zig-zag tool path with TCP + tool-axis vector
+- **Heightmap relief from PNG** (optional) - Decode a grayscale image, map pixel intensity to Z, build a triangle mesh, run the same zig-zag + RAPID pipeline
 - **ABB RAPID post-processor** - Emit `MODULE` programs with `MoveJ`/`MoveL` and `tooldata` for ABB robots and 5-axis CNC (controller does RTCP)
 - **OpenCV vision** (optional) - Real-time workpiece detection from camera
 
@@ -55,6 +56,40 @@ the controller is expected to do RTCP/TCPM (e.g. ABB tooldata, Fanuc G43.4).
 **Units:** all surfaces are assumed to be in millimeters. Convert STEP files
 to STL externally (FreeCAD / Fusion / OnShape) before loading.
 
+## Heightmap Relief from a PNG (Optional)
+
+Generate a relief toolpath directly from a grayscale image. White pixels become
+high points, black pixels become low (configurable). The decoded heightmap is
+turned into a triangle mesh that plugs into the same `Surface` trait used by
+the STL pipeline, so `ZigZagStrategy` and `AbbRapidPost` consume it unchanged.
+
+```bash
+# Generate the demo PNG fixture (one-time)
+cargo run --example gen_relief_png --features heightmap
+
+# Run the end-to-end pipeline (PNG -> zig-zag -> RAPID)
+cargo run --example surface_heightmap_zigzag --features heightmap
+```
+
+Pipeline:
+
+1. `HeightMapSurface::from_png("relief.png", opts)` - decode 8/16-bit grayscale
+   or RGB(A) PNG (RGB → luminance via Rec.601), apply gamma + optional Gaussian
+   blur, scale intensity to depth, triangulate the regular pixel grid (two
+   CCW triangles per quad), optionally add a flat z=0 pedestal ring.
+2. `Tool::load_json(...)` and `WorkpieceFrame::load_json(...)` - same as the
+   STL pipeline.
+3. `ZigZagStrategy.generate(&surface, &tool, &params)` - identical call site
+   to STL; the strategy is surface-agnostic.
+4. `AbbRapidPost.emit(...)` - same RAPID emitter.
+
+`HeightMapOpts` fields: `pixel_size_mm`, `max_depth_mm`, `gamma`, `blur_sigma`,
+`invert`, `base_pad_mm`. Defaults assume a fine 0.1 mm pixel and 5 mm depth.
+
+**Limitations:** heightmaps cannot represent undercuts. Feature size below
+~2× tool diameter is unmachinable (Nyquist). Brute-force ray-cast on every
+triangle is fine up to a few million triangles; a BVH is a future addition.
+
 ## With OpenCV Vision (Optional)
 
 Requires OpenCV installed on your system.
@@ -91,7 +126,7 @@ src/
 | `surface` | yes | 3D math (`nalgebra`), STL loading, surface and toolpath modules |
 | `abb` | yes | ABB RAPID post-processor |
 | `pointcloud` | no | Point-cloud surface stub (depth camera) |
-| `heightmap` | no | Heightmap surface stub (single camera) |
+| `heightmap` | no | Grayscale-PNG → heightmap → relief surface (pulls in `png` crate) |
 | `vision` | no | OpenCV camera input for 2D obstacle detection |
 
 `cargo build --no-default-features` produces the original 2D-only build.

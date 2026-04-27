@@ -16,6 +16,8 @@ pub mod pointcloud;
 pub mod heightmap;
 
 pub use stl::StlSurface;
+#[cfg(feature = "heightmap")]
+pub use heightmap::{HeightMapOpts, HeightMapSurface};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SurfaceError {

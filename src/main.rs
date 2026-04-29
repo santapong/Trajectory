@@ -132,6 +132,7 @@ fn surface_demo() {
         frame: &frame,
         feedrate_mm_min: 600.0,
         rapid_speed: 5000.0,
+        metadata: None,
     };
     let rapid = AbbRapidPost.emit(&toolpath, &ctx).expect("post");
     println!("--- First 10 lines of RAPID ---");

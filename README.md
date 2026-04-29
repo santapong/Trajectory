@@ -10,6 +10,7 @@ RRT/RRT* robot pathing algorithm for CNC jewelry manufacturing (filing and polis
 - **Path smoothing** - Post-processing to create smooth CNC-friendly toolpaths
 - **JSON waypoint export** - Serialized output for CNC controller consumption
 - **3D surface toolpaths** - Load STL surface, generate zig-zag tool path with TCP + tool-axis vector
+- **Heightmap relief from PNG** (optional) - Decode a grayscale image, map pixel intensity to Z, build a triangle mesh, run the same zig-zag + RAPID pipeline
 - **ABB RAPID post-processor** - Emit `MODULE` programs with `MoveJ`/`MoveL` and `tooldata` for ABB robots and 5-axis CNC (controller does RTCP)
 - **OpenCV vision** (optional) - Real-time workpiece detection from camera
 
@@ -55,6 +56,103 @@ the controller is expected to do RTCP/TCPM (e.g. ABB tooldata, Fanuc G43.4).
 **Units:** all surfaces are assumed to be in millimeters. Convert STEP files
 to STL externally (FreeCAD / Fusion / OnShape) before loading.
 
+## Heightmap Relief from a PNG (Optional)
+
+Generate a relief toolpath directly from a grayscale image. White pixels become
+high points, black pixels become low (configurable). The decoded heightmap is
+turned into a triangle mesh that plugs into the same `Surface` trait used by
+the STL pipeline, so `ZigZagStrategy` and `AbbRapidPost` consume it unchanged.
+
+```bash
+# Generate the demo PNG fixture (one-time)
+cargo run --example gen_relief_png --features heightmap
+
+# Run the end-to-end pipeline (PNG -> zig-zag -> RAPID)
+cargo run --example surface_heightmap_zigzag --features heightmap
+```
+
+Pipeline:
+
+1. `HeightMapSurface::from_png("relief.png", opts)` - decode 8/16-bit grayscale
+   or RGB(A) PNG (RGB → luminance via Rec.601), apply gamma + optional Gaussian
+   blur, scale intensity to depth, triangulate the regular pixel grid (two
+   CCW triangles per quad), optionally add a flat z=0 pedestal ring.
+2. `Tool::load_json(...)` and `WorkpieceFrame::load_json(...)` - same as the
+   STL pipeline.
+3. `ZigZagStrategy.generate(&surface, &tool, &params)` - identical call site
+   to STL; the strategy is surface-agnostic.
+4. `AbbRapidPost.emit(...)` - same RAPID emitter.
+
+`HeightMapOpts` fields: `pixel_size_mm`, `max_depth_mm`, `gamma`, `blur_sigma`,
+`invert`, `base_pad_mm`. Defaults assume a fine 0.1 mm pixel and 5 mm depth.
+
+**Limitations:** heightmaps cannot represent undercuts. Feature size below
+~2× tool diameter is unmachinable (Nyquist). Brute-force ray-cast on every
+triangle is fine up to a few million triangles; a BVH is a future addition.
+
+## CLI
+
+A `trajectory-cli` binary turns a PNG into a RAPID program without touching
+any Rust code — the entry point for UAT operators and shop-floor users.
+
+```bash
+cargo build --release --bin trajectory-cli --features cli
+
+./target/release/trajectory-cli relief \
+  --image samples/portrait.png \
+  --tool tests/fixtures/tool_ball6.json \
+  --frame tests/fixtures/workpiece_identity.json \
+  --pixel-size 0.1 --max-depth 4 --stepover 0.3 --safe-z 25 \
+  --feedrate 300 --note "UAT run 42" \
+  --out portrait.mod --json portrait_path.json
+```
+
+The emitted RAPID `MODULE` carries a provenance comment block (version, UTC
+timestamp, source-PNG SHA-256, options JSON, tool/frame paths, free-form
+note) so any program can be traced back to its inputs. Cross-field validation
+rejects unsafe combinations (stepover ≥ tool diameter, safe Z below relief
+peak, out-of-range opts).
+
+`trajectory-cli validate ...` runs the same checks without producing output.
+
+## Web frontend
+
+A single Rust binary serves a small SPA + an HTTP API. No Node or `npm`.
+
+```bash
+cargo run --release --bin trajectory-web --features web -- \
+  --tool tests/fixtures/tool_ball6.json \
+  --frame tests/fixtures/workpiece_identity.json \
+  --addr 127.0.0.1:8080
+# open http://127.0.0.1:8080
+```
+
+The page lets you drag-drop a PNG, tweak heightmap and toolpath options,
+preview the resulting toolpath in 3D (cutting moves green, travel blue), and
+download the RAPID program. API endpoints:
+
+- `GET  /api/health` → `{"status":"ok","version":"…"}`
+- `GET  /api/defaults` → default `ReliefRequest` JSON
+- `POST /api/relief` (multipart: `image=<png>`, `request=<json>`) → `{rapid, toolpath, stats}`
+
+## UAT
+
+UAT is documented in three companion files under `docs/`:
+
+- [`UAT_TEST_PLAN.md`](docs/UAT_TEST_PLAN.md) — scope, approach, environment,
+  test case ID schema, defect classification, entry/exit criteria, risk
+  register, schedule.
+- [`UAT_TEST_CASES.md`](docs/UAT_TEST_CASES.md) — every executable test case
+  (build, CLI, web API, web UI, validation, provenance, hardware dry-run)
+  with copy-pasteable commands and PASS/FAIL slots.
+- [`UAT.md`](docs/UAT.md) — operator-facing checklist + sign-off form.
+
+The calibration golden test (`tests/calibration_golden.rs`) is the
+load-bearing gate — it asserts a known step-pyramid PNG produces a RAPID
+program whose Z values include every expected plateau, and that the
+emitted provenance block carries `git_sha`, `source_sha256`, `tool_path`,
+and `frame_path`.
+
 ## With OpenCV Vision (Optional)
 
 Requires OpenCV installed on your system.
@@ -91,7 +189,9 @@ src/
 | `surface` | yes | 3D math (`nalgebra`), STL loading, surface and toolpath modules |
 | `abb` | yes | ABB RAPID post-processor |
 | `pointcloud` | no | Point-cloud surface stub (depth camera) |
-| `heightmap` | no | Heightmap surface stub (single camera) |
+| `heightmap` | no | Grayscale-PNG → heightmap → relief surface (pulls in `png` crate) |
+| `cli` | no | `trajectory-cli` binary (clap + tracing-subscriber); enables `heightmap` + `abb` |
+| `web` | no | `trajectory-web` Axum server + embedded SPA (enables `cli`) |
 | `vision` | no | OpenCV camera input for 2D obstacle detection |
 
 `cargo build --no-default-features` produces the original 2D-only build.

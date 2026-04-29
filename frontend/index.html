@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Trajectory · PNG → Toolpath</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0e1014;
+    --panel: #161a22;
+    --line: #232938;
+    --muted: #6f7a91;
+    --fg: #e7ecf5;
+    --accent: #5fa8ff;
+    --accent-2: #a0e8a0;
+    --error: #ff7676;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--fg);
+    display: grid;
+    grid-template-columns: 360px 1fr;
+    grid-template-rows: 48px 1fr;
+  }
+  header {
+    grid-column: 1 / 3;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 16px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+  }
+  header h1 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: 0.4px; }
+  header h1 span { color: var(--muted); font-weight: 400; }
+  header .health { font-size: 12px; color: var(--muted); }
+  aside {
+    background: var(--panel);
+    border-right: 1px solid var(--line);
+    overflow-y: auto;
+    padding: 16px;
+  }
+  main { position: relative; }
+  fieldset {
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    margin: 0 0 12px 0;
+    padding: 10px 12px 12px;
+  }
+  fieldset legend { color: var(--muted); padding: 0 6px; font-size: 12px; }
+  label.row {
+    display: grid;
+    grid-template-columns: 1fr 86px;
+    gap: 8px;
+    align-items: center;
+    margin: 6px 0;
+  }
+  label.row span { color: var(--muted); font-size: 12px; }
+  input[type=number], input[type=text] {
+    background: #0b0e14;
+    border: 1px solid var(--line);
+    color: var(--fg);
+    border-radius: 4px;
+    padding: 4px 6px;
+    width: 100%;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+  }
+  input[type=checkbox] { accent-color: var(--accent); }
+  .file-drop {
+    border: 1px dashed var(--line);
+    border-radius: 6px;
+    padding: 18px;
+    text-align: center;
+    color: var(--muted);
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+  }
+  .file-drop.over { border-color: var(--accent); background: rgba(95,168,255,0.06); }
+  .file-drop strong { color: var(--fg); }
+  button {
+    background: var(--accent);
+    color: #0a0d12;
+    border: 0; border-radius: 5px;
+    padding: 8px 12px; font-weight: 600; cursor: pointer;
+    width: 100%;
+  }
+  button:disabled { opacity: 0.5; cursor: progress; }
+  button.secondary {
+    background: transparent; color: var(--fg);
+    border: 1px solid var(--line);
+  }
+  .stats {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px; color: var(--muted);
+    background: #0b0e14;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 8px 10px;
+    margin: 8px 0 0;
+    white-space: pre;
+  }
+  .stats b { color: var(--fg); font-weight: 600; }
+  .err {
+    color: var(--error);
+    background: rgba(255,118,118,0.07);
+    border: 1px solid rgba(255,118,118,0.3);
+    border-radius: 4px;
+    padding: 8px 10px;
+    font-size: 12px;
+    margin: 8px 0 0;
+  }
+  #canvas-host {
+    position: absolute; inset: 0;
+  }
+  .axis-legend {
+    position: absolute; left: 12px; bottom: 12px;
+    background: rgba(10,13,18,0.7);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 6px 9px;
+    font-size: 11px; color: var(--muted);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .axis-legend b { color: var(--fg); font-weight: 600; }
+  .axis-legend .cut { color: var(--accent-2); }
+  .axis-legend .travel { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Trajectory <span>· PNG → ABB RAPID toolpath</span></h1>
+  <div class="health" id="health">…</div>
+</header>
+
+<aside>
+  <fieldset>
+    <legend>1. Heightmap</legend>
+    <div class="file-drop" id="drop">
+      <div><strong>Drop a PNG</strong> or click to choose</div>
+      <div id="file-info" style="margin-top:6px; color: var(--muted); font-size:12px;">no file</div>
+    </div>
+    <input type="file" id="file" accept="image/png" hidden />
+  </fieldset>
+
+  <fieldset>
+    <legend>2. Heightmap options</legend>
+    <label class="row"><span>pixel_size_mm</span><input type="number" id="pixel_size_mm" step="0.01" /></label>
+    <label class="row"><span>max_depth_mm</span><input type="number" id="max_depth_mm" step="0.1" /></label>
+    <label class="row"><span>gamma</span><input type="number" id="gamma" step="0.05" /></label>
+    <label class="row"><span>blur_sigma (px)</span><input type="number" id="blur_sigma" step="0.1" /></label>
+    <label class="row"><span>base_pad_mm</span><input type="number" id="base_pad_mm" step="0.1" /></label>
+    <label class="row"><span>invert</span><input type="checkbox" id="invert" /></label>
+  </fieldset>
+
+  <fieldset>
+    <legend>3. Toolpath</legend>
+    <label class="row"><span>stepover_mm</span><input type="number" id="stepover_mm" step="0.05" /></label>
+    <label class="row"><span>direction_deg</span><input type="number" id="direction_deg" step="1" /></label>
+    <label class="row"><span>safe_z_mm</span><input type="number" id="safe_z_mm" step="0.5" /></label>
+    <label class="row"><span>feed_height_mm</span><input type="number" id="feed_height_mm" step="0.1" /></label>
+    <label class="row"><span>max_segment_mm</span><input type="number" id="max_segment_mm" step="0.1" /></label>
+    <label class="row"><span>feedrate_mm_min</span><input type="number" id="feedrate_mm_min" step="10" /></label>
+  </fieldset>
+
+  <fieldset>
+    <legend>4. Job</legend>
+    <label class="row"><span>program_name</span><input type="text" id="program_name" /></label>
+    <label class="row"><span>note</span><input type="text" id="note" placeholder="UAT run #..." /></label>
+    <button id="generate" style="margin-top:6px;">Generate toolpath</button>
+    <button id="download" class="secondary" style="margin-top:6px;" disabled>Download .mod</button>
+    <div class="stats" id="stats">no run yet</div>
+    <div id="err" class="err" hidden></div>
+  </fieldset>
+</aside>
+
+<main>
+  <div id="canvas-host"></div>
+  <div class="axis-legend">
+    <b>Z up</b> · <span class="cut">━ cutting</span> &nbsp; <span class="travel">━ travel</span>
+    <br/>drag = orbit · wheel = zoom · right-drag = pan
+  </div>
+</main>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const $ = (id) => document.getElementById(id);
+const els = {
+  drop: $('drop'), file: $('file'), info: $('file-info'),
+  health: $('health'), generate: $('generate'), download: $('download'),
+  stats: $('stats'), err: $('err'),
+};
+
+let pickedFile = null;
+let lastRapid = '';
+
+const FIELDS = [
+  ['pixel_size_mm','heightmap','number'],
+  ['max_depth_mm','heightmap','number'],
+  ['gamma','heightmap','number'],
+  ['blur_sigma','heightmap','number'],
+  ['base_pad_mm','heightmap','number'],
+  ['invert','heightmap','bool'],
+  ['stepover_mm','toolpath','number'],
+  ['direction_deg','toolpath','number'],
+  ['safe_z_mm','toolpath','number'],
+  ['feed_height_mm','toolpath','number'],
+  ['max_segment_mm','toolpath','number'],
+  ['feedrate_mm_min','top','number'],
+  ['program_name','top','string'],
+  ['note','top','string'],
+];
+
+function applyDefaults(d) {
+  for (const [k, group, kind] of FIELDS) {
+    const e = $(k);
+    if (!e) continue;
+    let v;
+    if (group === 'top') v = d[k];
+    else v = d[group]?.[k];
+    if (v === undefined || v === null) continue;
+    if (kind === 'bool') e.checked = !!v;
+    else e.value = v;
+  }
+}
+
+function readForm() {
+  const out = { heightmap: {}, toolpath: {} };
+  for (const [k, group, kind] of FIELDS) {
+    const e = $(k);
+    if (!e) continue;
+    let v;
+    if (kind === 'bool') v = e.checked;
+    else if (kind === 'number') v = parseFloat(e.value);
+    else v = e.value;
+    if (group === 'top') out[k] = v;
+    else out[group][k] = v;
+  }
+  return out;
+}
+
+async function fetchHealth() {
+  try {
+    const r = await fetch('/api/health');
+    const j = await r.json();
+    els.health.textContent = `v${j.version} · ${j.status}`;
+  } catch (e) {
+    els.health.textContent = 'offline';
+  }
+}
+
+async function fetchDefaults() {
+  const r = await fetch('/api/defaults');
+  const j = await r.json();
+  applyDefaults(j);
+}
+
+function pickFile(f) {
+  pickedFile = f;
+  if (f) {
+    els.info.innerHTML = `<strong>${f.name}</strong> (${(f.size/1024).toFixed(1)} KB)`;
+  } else {
+    els.info.textContent = 'no file';
+  }
+}
+
+els.drop.addEventListener('click', () => els.file.click());
+els.drop.addEventListener('dragover', (e) => { e.preventDefault(); els.drop.classList.add('over'); });
+els.drop.addEventListener('dragleave', () => els.drop.classList.remove('over'));
+els.drop.addEventListener('drop', (e) => {
+  e.preventDefault(); els.drop.classList.remove('over');
+  const f = e.dataTransfer.files?.[0];
+  if (f) pickFile(f);
+});
+els.file.addEventListener('change', (e) => pickFile(e.target.files?.[0] || null));
+
+els.generate.addEventListener('click', async () => {
+  els.err.hidden = true; els.err.textContent = '';
+  if (!pickedFile) { showErr('pick a PNG first'); return; }
+  els.generate.disabled = true; els.generate.textContent = 'generating…';
+  try {
+    const fd = new FormData();
+    fd.append('image', pickedFile, pickedFile.name);
+    fd.append('request', new Blob([JSON.stringify(readForm())], { type: 'application/json' }));
+    const r = await fetch('/api/relief', { method: 'POST', body: fd });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({error: r.statusText}));
+      showErr(j.error || `${r.status} ${r.statusText}`);
+      return;
+    }
+    const j = await r.json();
+    lastRapid = j.rapid;
+    els.download.disabled = false;
+    renderStats(j.stats);
+    renderToolpath(j.toolpath, j.stats);
+  } catch (e) {
+    showErr(String(e));
+  } finally {
+    els.generate.disabled = false; els.generate.textContent = 'Generate toolpath';
+  }
+});
+
+els.download.addEventListener('click', () => {
+  const blob = new Blob([lastRapid], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const name = ($('program_name').value || 'program') + '.mod';
+  a.href = url; a.download = name; a.click();
+  URL.revokeObjectURL(url);
+});
+
+function showErr(s) {
+  els.err.textContent = s;
+  els.err.hidden = false;
+}
+
+function renderStats(s) {
+  els.stats.innerHTML =
+    `<b>${s.poses}</b> poses · <b>${s.cutting}</b> cutting / <b>${s.travel}</b> travel\n` +
+    `<b>${s.triangles}</b> mesh triangles\n` +
+    `AABB X [${s.aabb_min[0].toFixed(2)}, ${s.aabb_max[0].toFixed(2)}]\n` +
+    `     Y [${s.aabb_min[1].toFixed(2)}, ${s.aabb_max[1].toFixed(2)}]\n` +
+    `     Z [${s.aabb_min[2].toFixed(2)}, ${s.aabb_max[2].toFixed(2)}]`;
+}
+
+// ---- 3D viewer ----
+const host = $('canvas-host');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+host.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0e1014);
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 5000);
+camera.position.set(60, 60, 60);
+camera.up.set(0, 0, 1);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+
+const grid = new THREE.GridHelper(200, 40, 0x232938, 0x161a22);
+grid.rotation.x = Math.PI / 2;
+scene.add(grid);
+
+const axes = new THREE.AxesHelper(10);
+scene.add(axes);
+
+let pathGroup = new THREE.Group();
+scene.add(pathGroup);
+
+function fitCanvas() {
+  const r = host.getBoundingClientRect();
+  renderer.setSize(r.width, r.height, false);
+  camera.aspect = r.width / r.height;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', fitCanvas);
+fitCanvas();
+
+function clearGroup(g) {
+  while (g.children.length) {
+    const c = g.children.pop();
+    c.geometry?.dispose();
+    c.material?.dispose();
+  }
+}
+
+function renderToolpath(tp, stats) {
+  clearGroup(pathGroup);
+  if (!tp || !tp.poses?.length) return;
+
+  const cutPts = [];
+  const travelPts = [];
+  for (let i = 0; i < tp.poses.length - 1; i++) {
+    const a = tp.poses[i], b = tp.poses[i+1];
+    const arr = tp.feeds[i] ? cutPts : travelPts;
+    arr.push(a[0], a[1], a[2], b[0], b[1], b[2]);
+  }
+
+  if (cutPts.length) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(cutPts, 3));
+    pathGroup.add(new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0xa0e8a0 })));
+  }
+  if (travelPts.length) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(travelPts, 3));
+    pathGroup.add(new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0x5fa8ff, transparent: true, opacity: 0.45 })));
+  }
+
+  // AABB-aware camera fit
+  const cx = (stats.aabb_min[0] + stats.aabb_max[0]) / 2;
+  const cy = (stats.aabb_min[1] + stats.aabb_max[1]) / 2;
+  const cz = (stats.aabb_min[2] + stats.aabb_max[2]) / 2;
+  const dx = stats.aabb_max[0] - stats.aabb_min[0];
+  const dy = stats.aabb_max[1] - stats.aabb_min[1];
+  const dz = stats.aabb_max[2] - stats.aabb_min[2];
+  const span = Math.max(dx, dy, dz, 10);
+  controls.target.set(cx, cy, cz);
+  camera.position.set(cx + span * 1.5, cy - span * 1.5, cz + span * 1.5);
+  camera.lookAt(cx, cy, cz);
+}
+
+function loop() {
+  controls.update();
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+loop();
+
+fetchHealth();
+fetchDefaults();
+</script>
+</body>
+</html>

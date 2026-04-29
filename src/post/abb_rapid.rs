@@ -6,6 +6,8 @@
 
 use std::fmt::Write;
 
+use tracing::info_span;
+
 use crate::toolpath::Toolpath;
 
 use super::{PostContext, PostError, PostProcessor};
@@ -17,12 +19,19 @@ pub struct AbbRapidPost;
 
 impl PostProcessor for AbbRapidPost {
     fn emit(&self, path: &Toolpath, ctx: &PostContext<'_>) -> Result<String, PostError> {
+        let span = info_span!("abb_rapid.emit", program = ctx.program_name, poses = path.poses.len());
+        let _enter = span.enter();
+
         let mut out = String::new();
         let _ = write!(
             out,
             "{}",
             MODULE_HEADER.replace("{name}", ctx.program_name)
         );
+
+        if let Some(meta) = ctx.metadata {
+            out.push_str(&meta.to_rapid_comment());
+        }
 
         // Tool data — TCP offset, identity tool orientation, 1 kg dummy load.
         let tcp = ctx.tool.tcp.xyz;

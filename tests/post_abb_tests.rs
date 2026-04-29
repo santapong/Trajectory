@@ -32,6 +32,7 @@ fn test_rapid_program_snapshot() {
         frame: &frame,
         feedrate_mm_min: 600.0,
         rapid_speed: 5000.0,
+        metadata: None,
     };
 
     let rapid = AbbRapidPost.emit(&path, &ctx).expect("emit");
@@ -71,6 +72,7 @@ fn test_rapid_distinguishes_movej_and_movel() {
         frame: &frame,
         feedrate_mm_min: 600.0,
         rapid_speed: 5000.0,
+        metadata: None,
     };
     let rapid = AbbRapidPost.emit(&path, &ctx).unwrap();
     assert!(rapid.contains("MoveJ P0001"));

@@ -17,5 +17,8 @@ pub mod toolpath;
 #[cfg(feature = "abb")]
 pub mod post;
 
+#[cfg(all(feature = "heightmap", feature = "abb"))]
+pub mod relief_job;
+
 #[cfg(feature = "vision")]
 pub mod vision;

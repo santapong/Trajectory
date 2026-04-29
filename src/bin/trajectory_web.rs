@@ -30,7 +30,7 @@ use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 
 use trajectory::frame::WorkpieceFrame;
-use trajectory::relief_job::{run_from_bytes, JobError, ReliefRequest, ReliefStats};
+use trajectory::relief_job::{run_from_bytes, JobError, JobInputs, ReliefRequest, ReliefStats};
 use trajectory::tool::Tool;
 
 const INDEX_HTML: &str = include_str!("../../frontend/index.html");
@@ -50,6 +50,8 @@ struct Args {
 struct AppState {
     tool: Arc<Tool>,
     frame: Arc<WorkpieceFrame>,
+    tool_path: Arc<String>,
+    frame_path: Arc<String>,
 }
 
 #[tokio::main]
@@ -68,6 +70,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let state = AppState {
         tool: Arc::new(tool),
         frame: Arc::new(frame),
+        tool_path: Arc::new(args.tool.display().to_string()),
+        frame_path: Arc::new(args.frame.display().to_string()),
     };
 
     let app = Router::new()
@@ -173,8 +177,15 @@ async fn relief(
     let out = tokio::task::spawn_blocking({
         let tool = state.tool.clone();
         let frame = state.frame.clone();
+        let tool_path = state.tool_path.clone();
+        let frame_path = state.frame_path.clone();
         let png_label = png_label.clone();
-        move || run_from_bytes(&png, &png_label, &req, &tool, &frame)
+        move || {
+            let inputs = JobInputs::new(&tool, &frame)
+                .with_tool_path(tool_path.as_str())
+                .with_frame_path(frame_path.as_str());
+            run_from_bytes(&png, &png_label, &req, &inputs)
+        }
     })
     .await
     .map_err(|e| ApiError {

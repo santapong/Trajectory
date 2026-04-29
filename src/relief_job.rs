@@ -25,6 +25,31 @@ pub enum JobError {
     InvalidRequest(String),
 }
 
+/// Static job inputs the user should NOT be able to set via the public
+/// request body — `tool_path` / `frame_path` are determined by where the CLI
+/// or web binary loaded the configs from, not by an end-user form.
+#[derive(Debug, Clone)]
+pub struct JobInputs<'a> {
+    pub tool: &'a Tool,
+    pub frame: &'a WorkpieceFrame,
+    pub tool_path: Option<&'a str>,
+    pub frame_path: Option<&'a str>,
+}
+
+impl<'a> JobInputs<'a> {
+    pub fn new(tool: &'a Tool, frame: &'a WorkpieceFrame) -> Self {
+        Self { tool, frame, tool_path: None, frame_path: None }
+    }
+    pub fn with_tool_path(mut self, p: &'a str) -> Self {
+        self.tool_path = Some(p);
+        self
+    }
+    pub fn with_frame_path(mut self, p: &'a str) -> Self {
+        self.frame_path = Some(p);
+        self
+    }
+}
+
 /// Inputs to a relief job. Mirrors what the web frontend POSTs and what the
 /// CLI assembles from flags.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,8 +107,7 @@ pub fn run_from_bytes(
     png_bytes: &[u8],
     source_label: &str,
     request: &ReliefRequest,
-    tool: &Tool,
-    frame: &WorkpieceFrame,
+    inputs: &JobInputs<'_>,
 ) -> Result<ReliefOutput, JobError> {
     if png_bytes.is_empty() {
         return Err(JobError::InvalidRequest("empty PNG payload".into()));
@@ -104,7 +128,7 @@ pub fn run_from_bytes(
         std::fs::write(&p, png_bytes)?;
         p
     };
-    let result = run_inner(&tmp_path, png_bytes, source_label, request, tool, frame);
+    let result = run_inner(&tmp_path, png_bytes, source_label, request, inputs);
     let _ = std::fs::remove_file(&tmp_path);
     result
 }
@@ -114,20 +138,19 @@ fn run_inner(
     png_bytes: &[u8],
     source_label: &str,
     request: &ReliefRequest,
-    tool: &Tool,
-    frame: &WorkpieceFrame,
+    inputs: &JobInputs<'_>,
 ) -> Result<ReliefOutput, JobError> {
     let surface = HeightMapSurface::from_png(tmp_path, request.heightmap)?;
     let aabb = surface.aabb();
 
     request
         .toolpath
-        .validate(tool, &aabb)
+        .validate(inputs.tool, &aabb)
         .map_err(JobError::InvalidParams)?;
 
     let toolpath: Toolpath = {
         let _s = info_span!("toolpath.zigzag").entered();
-        ZigZagStrategy.generate(&surface, tool, &request.toolpath)
+        ZigZagStrategy.generate(&surface, inputs.tool, &request.toolpath)
     };
     let cuts = toolpath.feed_flags.iter().filter(|b| **b).count();
     let travel = toolpath.feed_flags.len() - cuts;
@@ -137,14 +160,20 @@ fn run_inner(
     let mut metadata = JobMetadata::new()
         .with_source_bytes(source_label, png_bytes)
         .with_opts_json(opts_json);
+    if let Some(p) = inputs.tool_path {
+        metadata = metadata.with_tool_path(p.to_string());
+    }
+    if let Some(p) = inputs.frame_path {
+        metadata = metadata.with_frame_path(p.to_string());
+    }
     if let Some(note) = &request.note {
         metadata = metadata.with_note(note.clone());
     }
 
     let ctx = PostContext {
         program_name: &request.program_name,
-        tool,
-        frame,
+        tool: inputs.tool,
+        frame: inputs.frame,
         feedrate_mm_min: request.feedrate_mm_min,
         rapid_speed: request.rapid_speed,
         metadata: Some(&metadata),
@@ -167,10 +196,9 @@ fn run_inner(
 pub fn run_from_path(
     png_path: &std::path::Path,
     request: &ReliefRequest,
-    tool: &Tool,
-    frame: &WorkpieceFrame,
+    inputs: &JobInputs<'_>,
 ) -> Result<ReliefOutput, JobError> {
     let bytes = std::fs::read(png_path)?;
     let label = png_path.display().to_string();
-    run_from_bytes(&bytes, &label, request, tool, frame)
+    run_from_bytes(&bytes, &label, request, inputs)
 }

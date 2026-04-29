@@ -12,7 +12,7 @@ use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 
 use trajectory::frame::WorkpieceFrame;
-use trajectory::relief_job::{run_from_path, ReliefRequest};
+use trajectory::relief_job::{run_from_path, JobInputs, ReliefRequest};
 use trajectory::surface::HeightMapOpts;
 use trajectory::tool::Tool;
 use trajectory::toolpath::ToolpathParams;
@@ -98,15 +98,27 @@ fn step_pyramid_produces_expected_z_plateaus() {
         rapid_speed: 5000.0,
         note: Some("calibration_golden".into()),
     };
-    let tool = Tool::load_json(fixture_path("tests/fixtures/tool_ball6.json")).expect("tool");
-    let frame = WorkpieceFrame::load_json(fixture_path("tests/fixtures/workpiece_identity.json")).expect("frame");
+    let tool_path_str = fixture_path("tests/fixtures/tool_ball6.json").display().to_string();
+    let frame_path_str = fixture_path("tests/fixtures/workpiece_identity.json").display().to_string();
+    let tool = Tool::load_json(&tool_path_str).expect("tool");
+    let frame = WorkpieceFrame::load_json(&frame_path_str).expect("frame");
+    let inputs = JobInputs::new(&tool, &frame)
+        .with_tool_path(&tool_path_str)
+        .with_frame_path(&frame_path_str);
 
-    let out = run_from_path(&path, &request, &tool, &frame).expect("relief job");
+    let out = run_from_path(&path, &request, &inputs).expect("relief job");
 
     // Provenance header is present and stable
     assert!(out.rapid.contains("! ----- trajectory provenance -----"));
+    assert!(out.rapid.contains("git_sha       :"));
     assert!(out.rapid.contains("source_sha256"));
     assert!(out.rapid.contains("note          : calibration_golden"));
+    assert!(
+        out.rapid.contains(&format!("tool_path     : {}", tool_path_str)),
+        "expected tool_path in header, got header:\n{}",
+        out.rapid.lines().take(20).collect::<Vec<_>>().join("\n")
+    );
+    assert!(out.rapid.contains(&format!("frame_path    : {}", frame_path_str)));
 
     // Toolpath structure non-empty
     assert!(out.stats.poses > 0, "no poses generated");
@@ -203,8 +215,9 @@ fn validate_rejects_stepover_at_or_above_tool_diameter() {
     };
     let tool = Tool::load_json(fixture_path("tests/fixtures/tool_ball6.json")).unwrap();
     let frame = WorkpieceFrame::load_json(fixture_path("tests/fixtures/workpiece_identity.json")).unwrap();
+    let inputs = JobInputs::new(&tool, &frame);
 
-    let err = run_from_path(&path, &request, &tool, &frame).expect_err("must reject");
+    let err = run_from_path(&path, &request, &inputs).expect_err("must reject");
     let msg = format!("{err}");
     assert!(msg.contains("stepover"), "expected stepover error, got: {msg}");
 
@@ -237,8 +250,9 @@ fn validate_rejects_unsafe_safe_z() {
     };
     let tool = Tool::load_json(fixture_path("tests/fixtures/tool_ball6.json")).unwrap();
     let frame = WorkpieceFrame::load_json(fixture_path("tests/fixtures/workpiece_identity.json")).unwrap();
+    let inputs = JobInputs::new(&tool, &frame);
 
-    let err = run_from_path(&path, &request, &tool, &frame).expect_err("must reject");
+    let err = run_from_path(&path, &request, &inputs).expect_err("must reject");
     let msg = format!("{err}");
     assert!(msg.contains("safe_z"), "expected safe_z error, got: {msg}");
 

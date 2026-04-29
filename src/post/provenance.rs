@@ -14,6 +14,7 @@ use sha2::{Digest, Sha256};
 #[derive(Debug, Clone)]
 pub struct JobMetadata {
     pub crate_version: &'static str,
+    pub git_sha: &'static str,
     /// Unix-epoch seconds at the moment the job ran.
     pub timestamp_unix: u64,
     /// SHA-256 of the source heightmap (or other input artifact), hex.
@@ -34,6 +35,7 @@ impl Default for JobMetadata {
     fn default() -> Self {
         Self {
             crate_version: env!("CARGO_PKG_VERSION"),
+            git_sha: option_env!("TRAJECTORY_GIT_SHA").unwrap_or("unknown"),
             timestamp_unix: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map(|d| d.as_secs())
@@ -92,6 +94,7 @@ impl JobMetadata {
         let mut out = String::new();
         out.push_str("  ! ----- trajectory provenance -----\n");
         out.push_str(&format!("  ! version       : {}\n", self.crate_version));
+        out.push_str(&format!("  ! git_sha       : {}\n", self.git_sha));
         out.push_str(&format!("  ! timestamp_utc : {} (unix)\n", self.timestamp_unix));
         if let Some(s) = &self.source_path {
             out.push_str(&format!("  ! source_path   : {s}\n"));

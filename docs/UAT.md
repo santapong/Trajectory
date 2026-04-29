@@ -1,8 +1,14 @@
 # Trajectory — UAT (User Acceptance Testing) Guide
 
-This document is the contract between the engineering team and the operator
-running Trajectory on a real machine. If every item below passes, the build is
-**accepted for production CNC use** for relief jewelry jobs.
+This document is the operator-facing **checklist** + sign-off form. For the
+full structured plan with test case IDs, defect classification, entry/exit
+criteria, and a risk register, see:
+
+- [`UAT_TEST_PLAN.md`](UAT_TEST_PLAN.md) — the binding plan
+- [`UAT_TEST_CASES.md`](UAT_TEST_CASES.md) — every executable test case
+
+If every item below passes, the build is **accepted for production CNC use**
+for relief jewelry jobs.
 
 UAT covers the PNG → ABB RAPID relief pipeline only. Other features
 (RRT planner, OpenCV vision) have their own acceptance criteria.

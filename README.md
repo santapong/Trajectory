@@ -137,12 +137,21 @@ download the RAPID program. API endpoints:
 
 ## UAT
 
-See [`docs/UAT.md`](docs/UAT.md) for the acceptance test procedure: build/test
-gates, CLI and web functional checks, provenance verification, dry-run on a
-real machine, and the sign-off form. The calibration golden test
-(`tests/calibration_golden.rs`) is the load-bearing gate — it asserts a known
-step-pyramid PNG produces a RAPID program whose Z values include every
-expected plateau.
+UAT is documented in three companion files under `docs/`:
+
+- [`UAT_TEST_PLAN.md`](docs/UAT_TEST_PLAN.md) — scope, approach, environment,
+  test case ID schema, defect classification, entry/exit criteria, risk
+  register, schedule.
+- [`UAT_TEST_CASES.md`](docs/UAT_TEST_CASES.md) — every executable test case
+  (build, CLI, web API, web UI, validation, provenance, hardware dry-run)
+  with copy-pasteable commands and PASS/FAIL slots.
+- [`UAT.md`](docs/UAT.md) — operator-facing checklist + sign-off form.
+
+The calibration golden test (`tests/calibration_golden.rs`) is the
+load-bearing gate — it asserts a known step-pyramid PNG produces a RAPID
+program whose Z values include every expected plateau, and that the
+emitted provenance block carries `git_sha`, `source_sha256`, `tool_path`,
+and `frame_path`.
 
 ## With OpenCV Vision (Optional)
 

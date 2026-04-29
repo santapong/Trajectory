@@ -16,7 +16,7 @@ use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
 use trajectory::frame::WorkpieceFrame;
-use trajectory::relief_job::{run_from_path, ReliefRequest};
+use trajectory::relief_job::{run_from_path, JobInputs, ReliefRequest};
 use trajectory::surface::HeightMapOpts;
 use trajectory::tool::Tool;
 use trajectory::toolpath::ToolpathParams;
@@ -161,7 +161,12 @@ fn cmd_relief(args: ReliefArgs) -> Result<(), Box<dyn std::error::Error>> {
         note: args.note,
     };
 
-    let out = run_from_path(&args.image, &request, &tool, &frame)?;
+    let tool_path = args.tool.display().to_string();
+    let frame_path = args.frame.display().to_string();
+    let inputs = JobInputs::new(&tool, &frame)
+        .with_tool_path(&tool_path)
+        .with_frame_path(&frame_path);
+    let out = run_from_path(&args.image, &request, &inputs)?;
 
     let rapid_path = args.out.unwrap_or_else(|| {
         let mut p = args.image.clone();
